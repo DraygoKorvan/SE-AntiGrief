@@ -39,14 +39,7 @@ namespace SEAntiGrief
 	{
 		
 		#region "Attributes"
-		[field: NonSerialized()]
-		private string m_motd = "";
-		[field: NonSerialized()]
-		private DateTime m_lastupdate;
-		[field: NonSerialized()]
-		private double m_interval = 300;
-		[field: NonSerialized()]
-		private bool m_enable = true;	
+	
 
 		#endregion
 
@@ -85,7 +78,7 @@ namespace SEAntiGrief
 		public void saveXML()
 		{
 
-			XmlSerializer x = new XmlSerializer(typeof(SEMotd));
+			XmlSerializer x = new XmlSerializer(typeof(SEAntiGrief));
 			TextWriter writer = new StreamWriter(Location + "Configuration.xml");
 			x.Serialize(writer, this);
 			writer.Close();
@@ -110,11 +103,6 @@ namespace SEAntiGrief
 
 		}
 
-		public void sendMotd()
-		{
-			if(m_motd != "")
-				ChatManager.Instance.SendPublicChatMessage(m_motd);
-		}
 
 		#region "EventHandlers"
 
@@ -133,18 +121,18 @@ namespace SEAntiGrief
 		{
 			if (obj.Owner == 0) return;
 			CubeGridEntity grid = obj.Parent;
-			long ownerid = 0;
 			//filter through cubeblocks in cubegrid find a cockpit named "Security"
 			foreach ( var cubeBlock in grid.CubeBlocks)
 			{
 				LogManager.APILog.WriteLineAndConsole("BlockName: " + cubeBlock.Name.ToString() + " Subtype: " + cubeBlock.Subtype.ToString());
 				if(cubeBlock.Name.Equals("Security"))
 				{
-					ownerid = cubeBlock.Owner;
+					obj.Owner = cubeBlock.Owner;
+					obj.ShareMode = cubeBlock.ShareMode;
+					return;
 				}
 			}
-			if (ownerid > 0)
-				obj.Owner = ownerid;
+
 			return;
 		}
 	
