@@ -92,11 +92,17 @@ namespace SEAntiGrief
 
 		public void saveXML()
 		{
-
-			XmlSerializer x = new XmlSerializer(typeof(SEAntiGriefSettings));
-			TextWriter writer = new StreamWriter(Location + "Configuration.xml");
-			x.Serialize(writer, this);
-			writer.Close();
+			try
+			{
+				XmlSerializer x = new XmlSerializer(typeof(SEAntiGriefSettings));
+				TextWriter writer = new StreamWriter(Location + "Configuration.xml");
+				x.Serialize(writer, settings);
+				writer.Close();
+			}
+			catch (Exception ex)
+			{
+				LogManager.APILog.WriteLineAndConsole("Could not save configuration: " + ex.ToString());
+			}
 
 		}
 		public void loadXML(bool defaults)
@@ -121,7 +127,7 @@ namespace SEAntiGrief
 					XmlSerializer x = new XmlSerializer(typeof(SEAntiGriefSettings));
 					TextReader reader = new StreamReader(Location + "Configuration.xml");
 					SEAntiGriefSettings obj = (SEAntiGriefSettings)x.Deserialize(reader);
-					settings.cockpitprotection = obj.cockpitprotection;
+					settings = obj;
 					reader.Close();
 				}
 			}
