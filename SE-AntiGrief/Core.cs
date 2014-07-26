@@ -32,14 +32,20 @@ using VRage.Common.Utils;
 
 
 
+
 namespace SEAntiGrief
 {
 	[Serializable()]
-	public class SEAntiGrief : PluginBase, SEModAPIExtensions.API.Plugin.Events.ICubeBlockEventHandler
+	public struct SEAntiGriefSettings
+	{
+		public bool cockpitprotection;
+	}
+
+	public class SEAntiGrief : PluginBase, ICubeBlockEventHandler, IChatEventHandler
 	{
 		
 		#region "Attributes"
-	
+		SEAntiGriefSettings settings;
 
 		#endregion
 
@@ -52,7 +58,7 @@ namespace SEAntiGrief
 
 		public override void Init()
 		{
-
+			settings.cockpitprotection = true;
 			Console.WriteLine("SE Antigrief Plugin '" + Id.ToString() + "' initialized!");
 			loadXML();
 
@@ -70,6 +76,15 @@ namespace SEAntiGrief
 			get { return System.IO.Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) + "\\"; }
 		
 		}
+		[Category("SE-AntiGrief")]
+		[Description("Cockpit Protection, warning disabling it will end current protection")]
+		[Browsable(true)]
+		[ReadOnly(false)]
+		public bool cockpitProtection
+		{
+			get { return settings.cockpitprotection; }
+			set { settings.cockpitprotection = value;  }
+		}
 
 		#endregion
 
@@ -78,21 +93,35 @@ namespace SEAntiGrief
 		public void saveXML()
 		{
 
-			XmlSerializer x = new XmlSerializer(typeof(SEAntiGrief));
+			XmlSerializer x = new XmlSerializer(typeof(SEAntiGriefSettings));
 			TextWriter writer = new StreamWriter(Location + "Configuration.xml");
 			x.Serialize(writer, this);
 			writer.Close();
 
 		}
-		public void loadXML()
+		public void loadXML(bool defaults)
 		{
 			try
 			{
+
+				//LogManager.APILog.WriteLineAndConsole(MyFileSystem.SavesPath + "\\SE-AntiGrief.xml " + SandboxGameAssemblyWrapper.ConfigContainerGetConfigData);
+				//if(!defaults)
+				//{
+				//	if(File.Exists(MyFileSystem.SavesPath + "SE-AntiGrief.xml"))
+				//	{
+				//		XmlSerializer x = new XmlSerializer(typeof(SEAntiGriefSettings));
+				//		TextReader reader = new StreamReader(MyFileSystem.SavesPath + "SE-AntiGrief.xml");
+				//		SEAntiGriefSettings obj = (SEAntiGriefSettings)x.Deserialize(reader);
+				//		settings.cockpitprotection = obj.cockpitprotection;
+				//		reader.Close();
+				//	}
+				//}
 				if (File.Exists(Location + "Configuration.xml"))
 				{
-					XmlSerializer x = new XmlSerializer(typeof(SEAntiGrief));
+					XmlSerializer x = new XmlSerializer(typeof(SEAntiGriefSettings));
 					TextReader reader = new StreamReader(Location + "Configuration.xml");
-					SEAntiGrief obj = (SEAntiGrief)x.Deserialize(reader);
+					SEAntiGriefSettings obj = (SEAntiGriefSettings)x.Deserialize(reader);
+					settings.cockpitprotection = obj.cockpitprotection;
 					reader.Close();
 				}
 			}
@@ -102,7 +131,53 @@ namespace SEAntiGrief
 			}
 
 		}
+		public void loadXML()
+		{
+			loadXML(false);
+		}
+		public void cockpitCheckLoop(CockpitEntity obj, CockpitEntity security, long owner, MyOwnershipShareModeEnum shareMode)
+		{
+			if (SandboxGameAssemblyWrapper.IsDebugging)
+			{
+				LogManager.APILog.WriteLineAndConsole("Security Protocol Enabled: " + security.Name + " On " + obj.Name);
+			}
+			int sleepval = 1000;
+			while (cockpitProtection)
+			{
+				//LogManager.APILog.WriteLine("cockpitCheckLoop");
+				try
+				{
+					Thread.Sleep(sleepval);
+					if (obj == null) throw new Exception("Obj not found.");
+					if (security == null) throw new Exception("Security Object not found.");
+					if (security.IntegrityPercent < 1) throw new Exception("Security Integrety Compromised.");
+					if (obj.CustomName.ToLower() == "security") throw new Exception("Console changed to security console, breaking security protocal");
+					if(obj.IntegrityPercent == 1)
+					{
+						obj.Owner = owner;
+						obj.ShareMode = shareMode;
+						//break;
+						sleepval = 3000;
+					}
+					if (obj.BuildPercent > 0.6)
+					{
+						obj.Owner = owner;
+						obj.ShareMode = shareMode;
+						sleepval = 3000;
+					}
+				}
+				catch (Exception ex)
+				{
+					if (SandboxGameAssemblyWrapper.IsDebugging)
+					{
+						LogManager.APILog.WriteLineAndConsole("Ending Security loop. " + ex.ToString());
+					}
+					break;
+				}
+				//loop till obj is deleted. 
+			}
 
+		}
 
 		#region "EventHandlers"
 
@@ -114,25 +189,44 @@ namespace SEAntiGrief
 		public override void Shutdown()
 		{
 			saveXML();
+			cockpitProtection = false;
 			return;
 		}
 
 		public void OnCubeBlockCreated(CubeBlockEntity obj)
 		{
+			if (!settings.cockpitprotection) return;
+			if (!(obj is CockpitEntity)) return; //apply only to placed cockpits. 
 			if (obj.Owner == 0) return;
 			CubeGridEntity grid = obj.Parent;
-			//filter through cubeblocks in cubegrid find a cockpit named "Security"
 			foreach ( var cubeBlock in grid.CubeBlocks)
 			{
-				LogManager.APILog.WriteLineAndConsole("BlockName: " + cubeBlock.Name.ToString() + " Subtype: " + cubeBlock.Subtype.ToString());
-				if(cubeBlock.Name.Equals("Security"))
+				if (cubeBlock == obj) continue;
+				if (cubeBlock is CockpitEntity)
 				{
-					obj.Owner = cubeBlock.Owner;
-					obj.ShareMode = cubeBlock.ShareMode;
-					return;
+					try
+					{
+						CockpitEntity entity = (CockpitEntity)cubeBlock;
+						CockpitEntity objentity = (CockpitEntity)obj;
+
+						if (entity.Name == "PassengerSeat") continue;
+						if (entity.CustomName.ToLower().Equals("security"))
+						{
+							obj.Owner = cubeBlock.Owner;
+							obj.ShareMode = cubeBlock.ShareMode;
+							Thread T = new Thread(() => cockpitCheckLoop(objentity, entity, cubeBlock.Owner, cubeBlock.ShareMode));
+							T.Start();
+							
+							return;
+						}
+					}
+					catch (Exception)
+					{
+						//skip no custom name set
+						continue;
+					}
 				}
 			}
-
 			return;
 		}
 	
@@ -140,6 +234,62 @@ namespace SEAntiGrief
 		{
 			return;
 		}
+
+		public void OnChatReceived(ChatManager.ChatEvent obj)
+		{
+
+			if (obj.sourceUserId == 0)
+				return;
+
+
+			if (obj.message[0] == '/')
+			{
+				bool isadmin = SandboxGameAssemblyWrapper.Instance.IsUserAdmin(obj.sourceUserId);
+				string[] words = obj.message.Split(' ');
+				string rem = "";
+				//proccess
+
+				if (isadmin && words[0] == "/ag-cp-enable")
+				{
+					ChatManager.Instance.SendPrivateChatMessage(obj.sourceUserId, "Cockpit Protection enabled");
+					cockpitProtection = true;
+					return;
+				}
+
+				if (isadmin && words[0] == "/ag-cp-disable")
+				{
+					ChatManager.Instance.SendPrivateChatMessage(obj.sourceUserId, "Cockpit Protection disabled");
+					cockpitProtection = false;
+					return;
+				}
+
+				if (isadmin && words[0] == "/ag-save")
+				{
+
+					saveXML();
+					ChatManager.Instance.SendPrivateChatMessage(obj.sourceUserId, "Antigrief Configuration Saved.");
+					return;
+				}
+				if (isadmin && words[0] == "/ag-load")
+				{
+					loadXML(false);
+					ChatManager.Instance.SendPrivateChatMessage(obj.sourceUserId, "Antigrief Configuration Loaded.");
+					return;
+				}
+				if (isadmin && words[0] == "/ag-loaddefault")
+				{
+					loadXML(true);
+					ChatManager.Instance.SendPrivateChatMessage(obj.sourceUserId, "Antigrief Configuration Defaults Loaded.");
+					return;
+				}
+			}
+			return;
+		}
+		public void OnChatSent(ChatManager.ChatEvent obj)
+		{
+			//do nothing
+			return;
+		}		
 		#endregion
 
 
