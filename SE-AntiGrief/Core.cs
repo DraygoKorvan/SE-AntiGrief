@@ -39,6 +39,9 @@ namespace SEAntiGrief
 	public struct SEAntiGriefSettings
 	{
 		public bool cockpitprotection;
+		public int  maxSmallDrill;
+		public int  maxLargeDrill;
+		public bool drillProtection;
 	}
 
 	public class SEAntiGrief : PluginBase, ICubeBlockEventHandler, IChatEventHandler
@@ -59,6 +62,9 @@ namespace SEAntiGrief
 		public override void Init()
 		{
 			settings.cockpitprotection = true;
+			settings.maxLargeDrill = 9;
+			settings.maxSmallDrill = 9;
+			settings.drillProtection = true;
 			Console.WriteLine("SE Antigrief Plugin '" + Id.ToString() + "' initialized!");
 			loadXML();
 
@@ -85,7 +91,33 @@ namespace SEAntiGrief
 			get { return settings.cockpitprotection; }
 			set { settings.cockpitprotection = value;  }
 		}
-
+		[Category("SE-AntiGrief")]
+		[Description("Drill Protection, set a maximum number of drills per ship")]
+		[Browsable(true)]
+		[ReadOnly(false)]
+		public bool drillProtection
+		{
+			get { return settings.drillProtection; }
+			set { settings.drillProtection = value; }
+		}
+		[Category("SE-AntiGrief")]
+		[Description("Maximum small drills per ship")]
+		[Browsable(true)]
+		[ReadOnly(false)]
+		public int maxSmallDrill
+		{
+			get { return settings.maxSmallDrill; }
+			set { settings.maxSmallDrill = value; }
+		}
+		[Category("SE-AntiGrief")]
+		[Description("Maximum large drills per ship")]
+		[Browsable(true)]
+		[ReadOnly(false)]
+		public int maxLargeDrill
+		{
+			get { return settings.maxLargeDrill; }
+			set { settings.maxLargeDrill = value; }
+		}
 		#endregion
 
 		#region "Methods"
@@ -110,7 +142,7 @@ namespace SEAntiGrief
 			try
 			{
 
-				//LogManager.APILog.WriteLineAndConsole(MyFileSystem.SavesPath + "\\SE-AntiGrief.xml " + SandboxGameAssemblyWrapper.ConfigContainerGetConfigData);
+				
 				//if(!defaults)
 				//{
 				//	if(File.Exists(MyFileSystem.SavesPath + "SE-AntiGrief.xml"))
@@ -201,37 +233,85 @@ namespace SEAntiGrief
 
 		public void OnCubeBlockCreated(CubeBlockEntity obj)
 		{
-			if (!settings.cockpitprotection) return;
-			if (!(obj is CockpitEntity)) return; //apply only to placed cockpits. 
-			if (obj.Owner == 0) return;
-			CubeGridEntity grid = obj.Parent;
-			foreach ( var cubeBlock in grid.CubeBlocks)
+			if (settings.cockpitprotection && obj is CockpitEntity && obj.Owner != 0)
 			{
-				if (cubeBlock == obj) continue;
-				if (cubeBlock is CockpitEntity)
-				{
-					try
-					{
-						CockpitEntity entity = (CockpitEntity)cubeBlock;
-						CockpitEntity objentity = (CockpitEntity)obj;
 
-						if (entity.Name == "PassengerSeat") continue;
-						if (entity.CustomName.ToLower().Equals("security"))
+				CubeGridEntity grid = obj.Parent;
+				foreach (var cubeBlock in grid.CubeBlocks)
+				{
+					if (cubeBlock == obj) continue;
+					if (cubeBlock is CockpitEntity)
+					{
+						try
 						{
-							obj.Owner = cubeBlock.Owner;
-							obj.ShareMode = cubeBlock.ShareMode;
-							Thread T = new Thread(() => cockpitCheckLoop(objentity, entity, cubeBlock.Owner, cubeBlock.ShareMode));
-							T.Start();
-							
-							return;
+							CockpitEntity entity = (CockpitEntity)cubeBlock;
+							CockpitEntity objentity = (CockpitEntity)obj;
+
+							if (entity.Name == "PassengerSeat") continue;
+							if (entity.CustomName.ToLower().Equals("security"))
+							{
+								obj.Owner = cubeBlock.Owner;
+								obj.ShareMode = cubeBlock.ShareMode;
+								Thread T = new Thread(() => cockpitCheckLoop(objentity, entity, cubeBlock.Owner, cubeBlock.ShareMode));
+								T.Start();
+
+								return;
+							}
+						}
+						catch (Exception)
+						{
+							//skip no custom name set
+							continue;
 						}
 					}
-					catch (Exception)
+				}
+			}
+			if (drillProtection && obj is ShipDrillEntity)
+			{
+				int max = 0;
+				int i = 0;
+				ShipDrillEntity drill = (ShipDrillEntity)obj;
+				CubeGridEntity grid = drill.Parent;
+				if (grid.GridSizeEnum == MyCubeSize.Large)
+				{
+					 max = maxLargeDrill;
+				}
+				if(grid.GridSizeEnum == MyCubeSize.Small)
+				{
+					max = maxSmallDrill;
+				}
+				if (max == 0) return;//0 = infinite. 
+				foreach (var cubeBlock in grid.CubeBlocks)
+				{
+					if (cubeBlock == obj) continue;
+					if(cubeBlock is ShipDrillEntity)
 					{
-						//skip no custom name set
-						continue;
+						i++;
+						if (i >= max)
+						{
+							if(obj.Owner != 0)
+							{
+								try
+								{
+									LogManager.APILog.WriteLineAndConsole("owner: " + obj.Owner + " steamid " + PlayerMap.Instance.GetSteamId(obj.Owner));
+									ChatManager.Instance.SendPrivateChatMessage( PlayerMap.Instance.GetSteamId(obj.Owner), "Error maximum number of drills exceeded.");
+								}
+								catch (Exception)
+								{
+									//do nothin
+								}
+							}
+
+							obj.Dispose();
+							
+							grid.CubeBlocks.Remove(obj);
+						
+							grid.RefreshCubeBlocks();
+							break;
+						}
 					}
 				}
+
 			}
 			return;
 		}
@@ -252,7 +332,7 @@ namespace SEAntiGrief
 			{
 				bool isadmin = SandboxGameAssemblyWrapper.Instance.IsUserAdmin(obj.sourceUserId);
 				string[] words = obj.message.Split(' ');
-				string rem = "";
+				//string rem = "";
 				//proccess
 
 				if (isadmin && words[0] == "/ag-cp-enable")
@@ -267,6 +347,30 @@ namespace SEAntiGrief
 					ChatManager.Instance.SendPrivateChatMessage(obj.sourceUserId, "Cockpit Protection disabled");
 					cockpitProtection = false;
 					return;
+				}
+				if (isadmin && words[0] == "/ag-dp-enable")
+				{
+					ChatManager.Instance.SendPrivateChatMessage(obj.sourceUserId, "Cockpit Protection enabled");
+					drillProtection = true;
+					return;
+				}
+
+				if (isadmin && words[0] == "/ag-dp-disable")
+				{
+					ChatManager.Instance.SendPrivateChatMessage(obj.sourceUserId, "Cockpit Protection disabled");
+					drillProtection = false;
+					return;
+				}
+
+				if (isadmin && words[0] == "/ag-set-small")
+				{
+					maxSmallDrill =  Convert.ToInt32(words[1]);
+					ChatManager.Instance.SendPublicChatMessage("Small drill limit set to " + maxSmallDrill);
+				}
+				if (isadmin && words[0] == "/ag-set-large")
+				{
+					maxLargeDrill = Convert.ToInt32(words[1]);
+					ChatManager.Instance.SendPublicChatMessage("Large drill limit set to " + maxLargeDrill);
 				}
 
 				if (isadmin && words[0] == "/ag-save")
